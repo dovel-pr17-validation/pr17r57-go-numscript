@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "testCases": [
+    {
+      "it": "-",
+      "balances": [
+        {
+          "account": "users:001:credit",
+          "asset": "USD/2",
+          "amount": 22
+        },
+        {
+          "account": "users:001:wallet",
+          "asset": "USD/2",
+          "amount": 19
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "users:001:wallet",
+          "destination": "platform",
+          "amount": 19,
+          "asset": "USD/2"
+        },
+        {
+          "source": "users:001:credit",
+          "destination": "platform",
+          "amount": 22,
+          "asset": "USD/2"
+        }
+      ]
+    }
+  ]
+}

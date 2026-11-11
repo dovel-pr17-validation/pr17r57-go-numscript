@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "featureFlags": [
+    "experimental-asset-scaling"
+  ],
+  "balances": [
+    {
+      "account": "acc1",
+      "asset": "EUR/2",
+      "amount": 50
+    }
+  ],
+  "testCases": [
+    {
+      "it": "casts all the avlb",
+      "balances": [
+        {
+          "account": "acc2",
+          "asset": "EUR/3",
+          "amount": 500
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "acc2",
+          "destination": "swap",
+          "amount": 500,
+          "asset": "EUR/3"
+        },
+        {
+          "source": "swap",
+          "destination": "acc2",
+          "amount": 50,
+          "asset": "EUR/2"
+        },
+        {
+          "source": "acc1",
+          "destination": "dest",
+          "amount": 50,
+          "asset": "EUR/2"
+        },
+        {
+          "source": "acc2",
+          "destination": "dest",
+          "amount": 50,
+          "asset": "EUR/2"
+        }
+      ]
+    }
+  ]
+}

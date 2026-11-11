@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "testCases": [
+    {
+      "it": "-",
+      "balances": [
+        {
+          "account": "memo:main",
+          "asset": "EUR/2",
+          "amount": 99999999
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "memo:main",
+          "destination": "world",
+          "amount": 100,
+          "asset": "EUR/2"
+        }
+      ]
+    }
+  ]
+}

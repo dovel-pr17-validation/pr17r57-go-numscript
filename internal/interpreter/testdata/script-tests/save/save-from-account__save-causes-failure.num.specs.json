@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "testCases": [
+    {
+      "it": "-",
+      "balances": [
+        {
+          "account": "alice",
+          "asset": "USD/2",
+          "amount": 30
+        }
+      ],
+      "expect.error.missingFunds": true
+    }
+  ]
+}

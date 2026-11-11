@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "featureFlags": [
+    "experimental-oneof"
+  ],
+  "testCases": [
+    {
+      "it": "-",
+      "balances": [
+        {
+          "account": "s1",
+          "asset": "GEM",
+          "amount": 10
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "s1",
+          "destination": "dest",
+          "amount": 10,
+          "asset": "GEM"
+        }
+      ]
+    }
+  ]
+}

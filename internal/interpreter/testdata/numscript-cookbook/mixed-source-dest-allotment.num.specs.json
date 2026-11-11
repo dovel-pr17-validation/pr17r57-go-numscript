@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "testCases": [
+    {
+      "it": "matches sources and destinations allotments",
+      "balances": [
+        {
+          "account": "src1",
+          "asset": "USD",
+          "amount": 999
+        },
+        {
+          "account": "src2",
+          "asset": "USD",
+          "amount": 999
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "src1",
+          "destination": "dest1",
+          "amount": 8,
+          "asset": "USD"
+        },
+        {
+          "source": "src2",
+          "destination": "dest1",
+          "amount": 16,
+          "asset": "USD"
+        },
+        {
+          "source": "world",
+          "destination": "dest1",
+          "amount": 15,
+          "asset": "USD"
+        },
+        {
+          "source": "world",
+          "destination": "dest2",
+          "amount": 38,
+          "asset": "USD"
+        }
+      ]
+    }
+  ]
+}

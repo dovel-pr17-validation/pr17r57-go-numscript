@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "featureFlags": [
+    "experimental-overdraft-function"
+  ],
+  "testCases": [
+    {
+      "it": "-",
+      "balances": [
+        {
+          "account": "acc",
+          "asset": "EUR/2",
+          "amount": 100
+        }
+      ]
+    }
+  ]
+}

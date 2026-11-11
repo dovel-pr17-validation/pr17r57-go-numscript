@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "featureFlags": [
+    "experimental-account-interpolation"
+  ],
+  "testCases": [
+    {
+      "it": "-",
+      "variables": {
+        "acc": "user:001",
+        "id": "42",
+        "status": "pending"
+      },
+      "expect.txMetadata": [
+        {
+          "key": "k",
+          "value": "acc:42:pending:user:001"
+        }
+      ]
+    }
+  ]
+}

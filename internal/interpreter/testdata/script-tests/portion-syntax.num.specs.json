@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "testCases": [
+    {
+      "it": "-",
+      "variables": {
+        "por": "1/3"
+      },
+      "expect.postings": [
+        {
+          "source": "world",
+          "destination": "a",
+          "amount": 1,
+          "asset": "COIN"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,281 @@
+package interpreter
+
+import (
+	"fmt"
+	"math/big"
+
+	"github.com/formancehq/numscript/internal/analysis"
+	"github.com/formancehq/numscript/internal/funds"
+	"github.com/formancehq/numscript/internal/parser"
+)
+
+type Value interface {
+	value()
+	String() string
+}
+
+type String string
+type Asset string
+type Portion big.Rat
+
+// AccountAddress is an account, optionally partitioned by a scope. The scope is
+// a separate dimension of the account rather than part of its name, so it is
+// modeled as its own field instead of being encoded into the name string.
+type AccountAddress struct {
+	Name  string
+	Scope string
+}
+
+type MonetaryInt big.Int
+type Monetary struct {
+	Amount MonetaryInt
+	Asset  Asset
+}
+
+func (String) value()         {}
+func (AccountAddress) value() {}
+func (MonetaryInt) value()    {}
+func (Monetary) value()       {}
+func (Portion) value()        {}
+func (Asset) value()          {}
+
+func NewAccountAddress(src string) (AccountAddress, InterpreterError) {
+	if !funds.ValidateAccount(src) {
+		return AccountAddress{}, InvalidAccountName{Name: src}
+	}
+	return AccountAddress{Name: src}, nil
+}
+
+func NewAsset(src string) (Asset, InterpreterError) {
+	if !funds.ValidateAsset(src) {
+		return Asset(""), InvalidAsset{Name: src}
+	}
+	return Asset(src), nil
+}
+
+// MetaString renders v as it appears in the metadata wire format: the value
+// written the way it would be in source, with no added delimiters. This is
+// deliberately not String(): String() delimits values so a reader can tell
+// them apart (it quotes strings and writes accounts as @name), which suits
+// diagnostics, but the metadata format is untyped by design — a value is
+// stored as its rendered text and compared as that text, so e.g.
+// set_tx_meta("k", "42") and set_tx_meta("k", 42) are indistinguishable here.
+//
+// An account value is rendered as its bare name, dropping any scope. Nothing
+// is lost in practice: a scoped account cannot reach metadata at all, since
+// setTxMeta and setAccountMeta both reject one via rejectScopedAccountMeta —
+// the panic below is a last-resort check on that invariant, not a real error
+// path.
+func MetaString(v Value) string {
+	switch v := v.(type) {
+	case String:
+		return string(v)
+	case AccountAddress:
+		if v.Scope != "" {
+			panic(fmt.Sprintf("MetaString: unexpected scoped account in metadata: %q (scope %q)", v.Name, v.Scope))
+		}
+		return v.Name
+	case Asset:
+		return string(v)
+	default:
+		// the remaining types (MonetaryInt, Monetary, Portion) already render
+		// without delimiters
+		return v.String()
+	}
+}
+
+func (v String) String() string {
+	return fmt.Sprintf(`"%s"`, string(v))
+}
+
+func (v AccountAddress) String() string {
+	if v.Scope == "" {
+		return fmt.Sprintf(`@%s`, v.Name)
+	}
+	return fmt.Sprintf(`scoped(%s, "%s")`, v.Name, v.Scope)
+}
+
+func (v MonetaryInt) String() string {
+	i := big.Int(v)
+	return i.String()
+}
+
+func (v Monetary) String() string {
+	return fmt.Sprintf("%s %s", v.Asset, v.Amount)
+}
+
+func (p Portion) String() string {
+	r := big.Rat(p)
+	return r.String()
+}
+
+func (v Asset) String() string {
+	return string(v)
+}
+
+func expectMonetary(v Value, r parser.Range) (Monetary, InterpreterError) {
+	switch v := v.(type) {
+	case Monetary:
+		return v, nil
+
+	default:
+		return Monetary{}, TypeError{Expected: analysis.TypeMonetary, Value: v, Range: r}
+	}
+}
+
+func expectMonetaryOfAsset(expectedAsset Asset) func(Value, parser.Range) (MonetaryInt, InterpreterError) {
+	return func(v Value, r parser.Range) (MonetaryInt, InterpreterError) {
+		m, err := expectMonetary(v, r)
+		if err != nil {
+			return MonetaryInt{}, err
+		}
+
+		if m.Asset != expectedAsset {
+			return MonetaryInt{}, MismatchedCurrencyError{Expected: string(expectedAsset), Got: string(m.Asset)}
+		}
+
+		return m.Amount, nil
+	}
+}
+
+func expectNumber(v Value, r parser.Range) (MonetaryInt, InterpreterError) {
+	switch v := v.(type) {
+	case MonetaryInt:
+		return v, nil
+
+	default:
+		return MonetaryInt{}, TypeError{Expected: analysis.TypeNumber, Value: v, Range: r}
+	}
+}
+
+func expectString(v Value, r parser.Range) (String, InterpreterError) {
+	switch v := v.(type) {
+	case String:
+		return v, nil
+
+	default:
+		return "", TypeError{Expected: analysis.TypeString, Value: v, Range: r}
+	}
+}
+
+func expectAsset(v Value, r parser.Range) (Asset, InterpreterError) {
+	switch v := v.(type) {
+	case Asset:
+		return v, nil
+
+	default:
+		return "", TypeError{Expected: analysis.TypeAsset, Value: v, Range: r}
+	}
+}
+
+func expectAccount(v Value, r parser.Range) (AccountAddress, InterpreterError) {
+	switch v := v.(type) {
+	case AccountAddress:
+		return v, nil
+
+	default:
+		return AccountAddress{}, TypeError{Expected: analysis.TypeAccount, Value: v, Range: r}
+	}
+}
+
+func expectPortion(v Value, r parser.Range) (*big.Rat, InterpreterError) {
+	switch v := v.(type) {
+	case Portion:
+		return (*big.Rat)(&v), nil
+
+	default:
+		return nil, TypeError{Expected: analysis.TypePortion, Value: v, Range: r}
+	}
+}
+
+func expectAnything(v Value, _ parser.Range) (Value, InterpreterError) {
+	return v, nil
+}
+
+func expectOneOf[T any](combinators ...func(v Value, r parser.Range) (T, InterpreterError)) func(v Value, r parser.Range) (T, InterpreterError) {
+	return func(v Value, r parser.Range) (T, InterpreterError) {
+		if len(combinators) == 0 {
+			// this should be unreachable
+			panic("Invalid argument: no combinators given")
+		}
+
+		var errs []TypeError
+		for _, combinator := range combinators {
+			out, err := combinator(v, r)
+			if err == nil {
+				return out, nil
+			}
+
+			typeErr, ok := err.(TypeError)
+			if !ok {
+				var default_ T
+				return default_, err
+			}
+			errs = append(errs, typeErr)
+		}
+
+		// e.g. typeErr.map(e => e.Expected).join("|")
+		expected := ""
+		for index, typeErr := range errs {
+			if index != 0 {
+				expected += "|"
+			}
+			expected += typeErr.Expected
+		}
+
+		var default_ T
+		return default_, TypeError{
+			Range:    r,
+			Value:    v,
+			Expected: expected,
+		}
+	}
+}
+
+func expectMapped[T any, U any](
+	combinator func(v Value, r parser.Range) (T, InterpreterError),
+	mapper func(value T) U,
+) func(v Value, r parser.Range) (U, InterpreterError) {
+	return func(v Value, r parser.Range) (U, InterpreterError) {
+		out, err := combinator(v, r)
+		if err != nil {
+			var default_ U
+			return default_, err
+		}
+		mapped := mapper(out)
+		return mapped, nil
+	}
+}
+
+func NewMonetary(asset string, n int64) Monetary {
+	return Monetary{
+		Asset:  Asset(asset),
+		Amount: NewMonetaryInt(n),
+	}
+}
+
+func NewMonetaryIntBig(n *big.Int) MonetaryInt {
+	bi := new(big.Int).Set(n)
+	return MonetaryInt(*bi)
+}
+
+func NewMonetaryInt(n int64) MonetaryInt {
+	bi := big.NewInt(n)
+	return MonetaryInt(*bi)
+}
+
+func (m MonetaryInt) Add(other MonetaryInt) MonetaryInt {
+	bi := big.Int(m)
+	otherBi := big.Int(other)
+
+	sum := new(big.Int).Add(&bi, &otherBi)
+	return MonetaryInt(*sum)
+}
+
+func (m MonetaryInt) Sub(other MonetaryInt) MonetaryInt {
+	bi := big.Int(m)
+	otherBi := big.Int(other)
+
+	sum := new(big.Int).Sub(&bi, &otherBi)
+	return MonetaryInt(*sum)
+}

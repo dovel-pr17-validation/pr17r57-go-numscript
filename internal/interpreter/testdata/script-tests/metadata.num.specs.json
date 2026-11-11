@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "testCases": [
+    {
+      "it": "-",
+      "balances": [
+        {
+          "account": "sales:042",
+          "asset": "EUR/2",
+          "amount": 2500
+        },
+        {
+          "account": "users:053",
+          "asset": "EUR/2",
+          "amount": 500
+        }
+      ],
+      "variables": {
+        "sale": "sales:042"
+      },
+      "metadata": [
+        {
+          "account": "sales:042",
+          "key": "seller",
+          "value": "users:053"
+        },
+        {
+          "account": "users:053",
+          "key": "commission",
+          "value": "12.5%"
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "sales:042",
+          "destination": "users:053",
+          "amount": 88,
+          "asset": "EUR/2"
+        },
+        {
+          "source": "sales:042",
+          "destination": "platform",
+          "amount": 12,
+          "asset": "EUR/2"
+        }
+      ]
+    }
+  ]
+}

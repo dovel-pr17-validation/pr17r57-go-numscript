@@ -1,0 +1,395 @@
+package specs_format_test
+
+import (
+	"bytes"
+	"os"
+	"testing"
+
+	"github.com/formancehq/numscript/internal/specs_format"
+	"github.com/gkampitakis/go-snaps/snaps"
+	"github.com/stretchr/testify/require"
+)
+
+func TestShowDiff(t *testing.T) {
+	var buf bytes.Buffer
+	specs_format.ShowDiff(
+		&buf,
+		map[string]any{
+			"common": "ok",
+			"x":      42,
+		},
+		map[string]any{
+			"common": "ok",
+			"x":      100,
+		},
+	)
+	snaps.MatchSnapshot(t, buf.String())
+}
+
+func TestReadSpecsFilesNonexistentPath(t *testing.T) {
+	specs, err := specs_format.ReadSpecsFiles([]string{"path/that/does/not/exist"})
+	require.Error(t, err)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	require.Nil(t, specs)
+}
+
+func TestSingleTest(t *testing.T) {
+	var out bytes.Buffer
+
+	script := `
+		send [USD/2 100] (
+			source = @world
+			destination = @dest
+		)
+	`
+
+	specs := `
+		{
+			"testCases": [
+				{
+					"it": "tfailing",
+					"expect.postings": [{
+						"source": "wrong-source",
+						"destination": "dest",
+						"asset": "USD/2",
+						"amount": 100
+					}]
+				},
+				{
+					"it": "tpassing",
+					"expect.postings": [{
+						"source": "world",
+						"destination": "dest",
+						"asset": "USD/2",
+						"amount": 100
+					}]
+				}
+			] 
+		}
+	`
+
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{
+		{
+			NumscriptPath:    "example.num",
+			SpecsPath:        "example.num.specs.json",
+			NumscriptContent: script,
+			SpecsFileContent: []byte(specs),
+		},
+	})
+
+	require.False(t, success)
+
+	snaps.MatchSnapshot(t, out.String())
+}
+
+func TestComplexAssertions(t *testing.T) {
+	var out bytes.Buffer
+
+	script := `
+		send [USD/2 100] (
+			source = @alice
+			destination = @dest
+		)
+	`
+
+	specs := `
+		{
+			"testCases": [
+				{
+					"it": "send when there are enough funds",
+					"balances": [
+						{ "account": "alice", "asset": "USD/2", "amount": 9999 }
+					],
+					"expect.endBalances": [
+							{ "account": "alice", "asset": "USD/2", "amount": -100 },
+							{ "account": "dest", "asset": "USD/2", "amount": 1 }
+					],
+					"expect.movements": [
+						{ "source": "alice", "destination": "dest", "asset": "EUR", "amount": 100 }
+					],
+					"expect.error.missingFunds": true
+				},
+				{
+					"it": "tpassing",
+					"balances": [
+						{ "account": "alice", "asset": "USD/2", "amount": 0 }
+					],
+					"expect.error.missingFunds": true
+				}
+			] 
+		}
+	`
+
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{
+		{
+			NumscriptPath:    "example.num",
+			SpecsPath:        "example.num.specs.json",
+			NumscriptContent: script,
+			SpecsFileContent: []byte(specs),
+		},
+	})
+
+	require.False(t, success)
+
+	snaps.MatchSnapshot(t, out.String())
+}
+
+func TestNoFilesErr(t *testing.T) {
+	var out bytes.Buffer
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{})
+	require.False(t, success)
+	snaps.MatchSnapshot(t, out.String())
+}
+
+func TestParseErrSpecs(t *testing.T) {
+	var out bytes.Buffer
+
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{
+		{
+			NumscriptPath:    "example.num",
+			SpecsPath:        "example.num.specs.json",
+			NumscriptContent: "",
+			SpecsFileContent: []byte(`
+		not a json
+	`),
+		},
+	})
+	require.False(t, success)
+	snaps.MatchSnapshot(t, out.String())
+}
+
+func TestSchemaErrSpecs(t *testing.T) {
+	var out bytes.Buffer
+
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{
+		{
+			NumscriptPath:    "example.num",
+			SpecsPath:        "example.num.specs.json",
+			NumscriptContent: "",
+			SpecsFileContent: []byte(`
+		{ "balances": 42 }
+	`),
+		},
+	})
+	require.False(t, success)
+	snaps.MatchSnapshot(t, out.String())
+}
+
+func TestDuplicateBalanceInTestCaseErr(t *testing.T) {
+	var out bytes.Buffer
+
+	specs := `{
+		"testCases": [
+			{
+				"it": "t1",
+				"balances": [
+					{ "account": "src", "asset": "USD", "amount": 9999 },
+					{ "account": "src", "asset": "USD", "amount": 1 }
+				],
+				"expect.postings": null
+			}
+		]
+	}`
+
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{
+		{
+			NumscriptPath:    "example.num",
+			SpecsPath:        "example.num.specs.json",
+			NumscriptContent: "",
+			SpecsFileContent: []byte(specs),
+		},
+	})
+	require.False(t, success)
+	snaps.MatchSnapshot(t, out.String())
+}
+
+func TestDuplicateBalanceInOuterErr(t *testing.T) {
+	var out bytes.Buffer
+
+	specs := `{
+		"balances": [
+			{ "account": "src", "asset": "USD", "amount": 9999 },
+			{ "account": "src", "asset": "USD", "amount": 1 }
+		],
+		"testCases": [
+			{ "it": "t1", "expect.postings": null }
+		]
+	}`
+
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{
+		{
+			NumscriptPath:    "example.num",
+			SpecsPath:        "example.num.specs.json",
+			NumscriptContent: "",
+			SpecsFileContent: []byte(specs),
+		},
+	})
+	require.False(t, success)
+	snaps.MatchSnapshot(t, out.String())
+}
+
+func TestDuplicateMetaInTestCaseErr(t *testing.T) {
+	var out bytes.Buffer
+
+	specs := `{
+		"testCases": [
+			{
+				"it": "t1",
+				"metadata": [
+					{ "account": "acc", "key": "k", "value": "a" },
+					{ "account": "acc", "key": "k", "value": "b" }
+				],
+				"expect.postings": null
+			}
+		]
+	}`
+
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{
+		{
+			NumscriptPath:    "example.num",
+			SpecsPath:        "example.num.specs.json",
+			NumscriptContent: "",
+			SpecsFileContent: []byte(specs),
+		},
+	})
+	require.False(t, success)
+	snaps.MatchSnapshot(t, out.String())
+}
+
+func TestDuplicateMetaInOuterErr(t *testing.T) {
+	var out bytes.Buffer
+
+	specs := `{
+		"metadata": [
+			{ "account": "acc", "key": "k", "value": "a" },
+			{ "account": "acc", "key": "k", "value": "b" }
+		],
+		"testCases": [
+			{ "it": "t1", "expect.postings": null }
+		]
+	}`
+
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{
+		{
+			NumscriptPath:    "example.num",
+			SpecsPath:        "example.num.specs.json",
+			NumscriptContent: "",
+			SpecsFileContent: []byte(specs),
+		},
+	})
+	require.False(t, success)
+	snaps.MatchSnapshot(t, out.String())
+}
+
+// A (account, key) pair that differs only by scope is NOT a duplicate.
+func TestSameMetaKeyDifferentScopeIsNotDuplicate(t *testing.T) {
+	var out bytes.Buffer
+
+	specs := `{
+		"metadata": [
+			{ "account": "acc", "key": "k", "value": "a" },
+			{ "account": "acc", "key": "k", "value": "b", "scope": "myscope" }
+		],
+		"testCases": [
+			{ "it": "t1", "expect.postings": null }
+		]
+	}`
+
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{
+		{
+			NumscriptPath:    "example.num",
+			SpecsPath:        "example.num.specs.json",
+			NumscriptContent: "",
+			SpecsFileContent: []byte(specs),
+		},
+	})
+	require.True(t, success)
+}
+
+func TestNumscriptParseErr(t *testing.T) {
+	var out bytes.Buffer
+
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{
+		{
+			NumscriptPath:    "example.num",
+			SpecsPath:        "example.num.specs.json",
+			NumscriptContent: "!err",
+			SpecsFileContent: []byte(`
+		{ }
+	`),
+		},
+	})
+	require.False(t, success)
+	snaps.MatchSnapshot(t, out.String())
+}
+
+func TestRuntimeErr(t *testing.T) {
+	var out bytes.Buffer
+
+	specs := `
+		{
+			"testCases": [
+				{
+					"it": "runs",
+					"expect.error.missingFunds": false
+				}
+			] 
+		}
+	`
+
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{
+		{
+			NumscriptPath:    "example.num",
+			SpecsPath:        "example.num.specs.json",
+			NumscriptContent: `send [USD/2 100] ( source = "ops!" destination = @world)`,
+			SpecsFileContent: []byte(specs),
+		},
+	})
+	require.False(t, success)
+	snaps.MatchSnapshot(t, out.String())
+}
+
+func TestFocusUi(t *testing.T) {
+
+	specs := `{
+		"testCases": [
+			{
+				"it": "t1",
+				"variables": { "source": "src", "amount": "10" },
+				"balances": [ { "account": "src", "asset": "USD", "amount": 9999 } ],
+				"expect.postings": [
+					{ "source": "src", "destination": "dest", "asset": "USD", "amount": 42 }
+				]
+			},
+			{
+				"it": "t2",
+				"focus": true,
+				"variables": { "source": "src", "amount": "42" },
+				"balances": [ { "account": "src", "asset": "USD", "amount": 9999 } ],
+				"expect.postings": [
+					{ "source": "src", "destination": "dest", "asset": "USD", "amount": 42 }
+				]
+			}
+		]
+	}`
+
+	var out bytes.Buffer
+	success := specs_format.RunSpecs(&out, &out, []specs_format.RawSpec{
+		{
+			NumscriptPath: "example.num",
+			SpecsPath:     "example.num.specs.json",
+			NumscriptContent: `	vars {
+		account $source
+		number $amount
+	}
+
+	send [USD $amount] (
+		source = $source
+		destination = @dest
+	)`,
+			SpecsFileContent: []byte(specs),
+		},
+	})
+	require.False(t, success)
+	snaps.MatchSnapshot(t, out.String())
+}

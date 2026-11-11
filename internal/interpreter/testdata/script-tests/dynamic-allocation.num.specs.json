@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "testCases": [
+    {
+      "it": "-",
+      "balances": [
+        {
+          "account": "a",
+          "asset": "GEM",
+          "amount": 15
+        }
+      ],
+      "variables": {
+        "p": "15%"
+      },
+      "expect.postings": [
+        {
+          "source": "a",
+          "destination": "b",
+          "amount": 13,
+          "asset": "GEM"
+        },
+        {
+          "source": "a",
+          "destination": "c",
+          "amount": 2,
+          "asset": "GEM"
+        }
+      ]
+    }
+  ]
+}

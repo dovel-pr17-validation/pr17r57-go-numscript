@@ -1,0 +1,99 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "featureFlags": [
+    "experimental-asset-scaling"
+  ],
+  "testCases": [
+    {
+      "it": "allow solution with spare money",
+      "balances": [
+        {
+          "account": "src",
+          "asset": "EUR",
+          "amount": 100
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "src",
+          "destination": "swap",
+          "amount": 1,
+          "asset": "EUR"
+        },
+        {
+          "source": "swap",
+          "destination": "src",
+          "amount": 100,
+          "asset": "EUR/2"
+        },
+        {
+          "source": "src",
+          "destination": "dest",
+          "amount": 2,
+          "asset": "EUR/2"
+        }
+      ]
+    },
+    {
+      "it": "allow solution with spare money (2)",
+      "balances": [
+        {
+          "account": "src",
+          "asset": "EUR",
+          "amount": 100
+        },
+        {
+          "account": "src",
+          "asset": "EUR/1",
+          "amount": 100
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "src",
+          "destination": "swap",
+          "amount": 1,
+          "asset": "EUR/1"
+        },
+        {
+          "source": "swap",
+          "destination": "src",
+          "amount": 10,
+          "asset": "EUR/2"
+        },
+        {
+          "source": "src",
+          "destination": "dest",
+          "amount": 2,
+          "asset": "EUR/2"
+        }
+      ]
+    },
+    {
+      "it": "no solution",
+      "balances": [
+        {
+          "account": "src",
+          "asset": "EUR",
+          "amount": 0
+        },
+        {
+          "account": "src",
+          "asset": "EUR/2",
+          "amount": 1
+        },
+        {
+          "account": "src",
+          "asset": "EUR/3",
+          "amount": 1
+        },
+        {
+          "account": "src",
+          "asset": "EUR/4",
+          "amount": 10
+        }
+      ],
+      "expect.error.missingFunds": true
+    }
+  ]
+}

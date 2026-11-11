@@ -1,0 +1,379 @@
+package numscript
+
+import (
+	"context"
+
+	"github.com/formancehq/numscript/internal/compiler"
+	"github.com/formancehq/numscript/internal/interpreter"
+	"github.com/formancehq/numscript/internal/parser"
+	"github.com/formancehq/numscript/internal/typecheck"
+	"github.com/formancehq/numscript/internal/vm"
+)
+
+// This struct represents a parsed numscript source code
+type ParseResult struct {
+	parseResult parser.ParseResult
+}
+
+// Returns a map from a variable's name to its type.
+//
+// doesn't include variables whose value is already defined within the script
+func (p ParseResult) GetNeededVariables() map[string]string {
+	m := make(map[string]string)
+
+	if p.parseResult.Value.Vars == nil {
+		return m
+	}
+
+	for _, varDecl := range p.parseResult.Value.Vars.Declarations {
+		if varDecl.Name == nil || varDecl.Origin != nil {
+			continue
+		}
+
+		m[varDecl.Name.Name] = varDecl.Type.Name
+	}
+
+	return m
+}
+
+// func (*ParseResult) GetDiagnostics() []Diagnostic {}
+
+type ParserError = parser.ParserError
+
+func Parse(code string) ParseResult {
+	return ParseResult{parseResult: parser.Parse(code)}
+}
+
+var ParseErrorsToString = parser.ParseErrorsToString
+
+func (p ParseResult) GetParsingErrors() []ParserError {
+	return p.parseResult.Errors
+}
+
+type (
+	VariablesMap    = interpreter.VariablesMap
+	Posting         = interpreter.Posting
+	ExecutionResult = interpreter.ExecutionResult
+	// For each account, list of the needed assets
+	BalanceQuery     = interpreter.BalanceQuery
+	BalanceQueryItem = interpreter.BalanceQueryItem
+	MetadataQuery    = interpreter.MetadataQuery
+	AccountBalance   = interpreter.AccountBalance
+	Balances         = interpreter.Balances
+	BalanceRow       = interpreter.BalanceRow
+
+	// Input account metadata (opaque, string-valued) read via meta()
+	AccountMetadataRow = interpreter.AccountMetadataRow
+	AccountsMetadata   = interpreter.AccountsMetadata
+
+	// The account metadata set during the execution (tagged, typed values)
+	SetAccountMetadataRow = interpreter.SetAccountMetadataRow
+	SetAccountsMetadata   = interpreter.SetAccountsMetadata
+
+	// The transaction metadata, set by set_tx_meta()
+	Metadata = interpreter.Metadata
+
+	Store = interpreter.Store
+
+	StaticStore = interpreter.StaticStore
+
+	Value = interpreter.Value
+
+	InterpreterError = interpreter.InterpreterError
+
+	ResolvedDependencies = interpreter.ResolvedDependencies
+	AccountDependency    = interpreter.AccountDependency
+	MetaDependency       = interpreter.MetaDependency
+)
+
+// Interpreter error types, aliased so callers of Run and ResolveDependencies
+// can classify failures with errors.As without reaching into internal packages.
+// All are returned by value. Their exported fields, other than the embedded
+// source range, are part of the public contract: hosts may persist them as
+// structured facts, so they are only ever added to, never renamed or removed.
+//
+// These are caused by the script, its vars, or the state it runs against.
+type (
+	MissingFundsErr                         = interpreter.MissingFundsErr
+	NegativeAmountErr                       = interpreter.NegativeAmountErr
+	MissingVariableErr                      = interpreter.MissingVariableErr
+	InvalidAccountName                      = interpreter.InvalidAccountName
+	InvalidAsset                            = interpreter.InvalidAsset
+	InvalidColor                            = interpreter.InvalidColor
+	InvalidScope                            = interpreter.InvalidScope
+	InvalidMonetaryLiteral                  = interpreter.InvalidMonetaryLiteral
+	InvalidNumberLiteral                    = interpreter.InvalidNumberLiteral
+	BadPortionParsingErr                    = interpreter.BadPortionParsingErr
+	MismatchedCurrencyError                 = interpreter.MismatchedCurrencyError
+	DivideByZero                            = interpreter.DivideByZero
+	TypeError                               = interpreter.TypeError
+	MetadataNotFound                        = interpreter.MetadataNotFound
+	NegativeBalanceError                    = interpreter.NegativeBalanceError
+	InvalidAllotmentSum                     = interpreter.InvalidAllotmentSum
+	NegativePortion                         = interpreter.NegativePortion
+	InvalidRemainingAllotment               = interpreter.InvalidRemainingAllotment
+	InvalidAllotmentInSendAll               = interpreter.InvalidAllotmentInSendAll
+	InvalidUnboundedInSendAll               = interpreter.InvalidUnboundedInSendAll
+	InvalidUnboundedAddressInScalingAddress = interpreter.InvalidUnboundedAddressInScalingAddress
+	InvalidNestedMeta                       = interpreter.InvalidNestedMeta
+	CannotCastToString                      = interpreter.CannotCastToString
+	CannotCastScopedAccountToString         = interpreter.CannotCastScopedAccountToString
+	CannotStoreScopedAccountInMeta          = interpreter.CannotStoreScopedAccountInMeta
+	UnboundVariableErr                      = interpreter.UnboundVariableErr
+	UnboundFunctionErr                      = interpreter.UnboundFunctionErr
+	BadArityErr                             = interpreter.BadArityErr
+	InvalidTypeErr                          = interpreter.InvalidTypeErr
+	ExperimentalFeature                     = interpreter.ExperimentalFeature
+	InvalidFeature                          = interpreter.InvalidFeature
+)
+
+// Interpreter errors reporting that a Store call failed; Unwrap yields the
+// store's own error.
+type (
+	QueryBalanceError  = interpreter.QueryBalanceError
+	QueryMetadataError = interpreter.QueryMetadataError
+)
+
+// Interpreter errors reporting defects in numscript itself, never caused by the
+// script or its inputs. Their fields are diagnostic only and not part of the
+// contract.
+type (
+	InternalError  = interpreter.InternalError
+	UnhandledError = interpreter.UnhandledError
+)
+
+var ErrScalingNotSupported = interpreter.ErrScalingNotSupported
+
+func (p ParseResult) Run(ctx context.Context, vars VariablesMap, store Store) (ExecutionResult, InterpreterError) {
+	return p.RunWithFeatureFlags(ctx, vars, store, nil)
+}
+
+func (p ParseResult) RunWithFeatureFlags(
+	ctx context.Context,
+	vars VariablesMap,
+	store Store,
+	featureFlags map[string]struct{},
+) (ExecutionResult, InterpreterError) {
+	if len(p.parseResult.Errors) != 0 {
+		return ExecutionResult{}, p.parseResult.Errors[0]
+	}
+
+	if featureFlags == nil {
+		featureFlags = make(map[string]struct{})
+	}
+
+	res, err := interpreter.RunProgram(ctx, p.parseResult.Value, vars, store, featureFlags)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	return *res, nil
+}
+
+// ResolveDependencies statically determines which accounts and metadata the
+// script reads and writes, resolving account/asset/key expressions against the
+// given vars and store.
+func (p ParseResult) ResolveDependencies(ctx context.Context, vars VariablesMap, store Store) (ResolvedDependencies, error) {
+	if len(p.parseResult.Errors) != 0 {
+		return ResolvedDependencies{}, p.parseResult.Errors[0]
+	}
+
+	return interpreter.ResolveDependencies(ctx, store, vars, p.parseResult.Value)
+}
+
+func (p ParseResult) GetSource() string {
+	return p.parseResult.Source
+}
+
+type (
+	VarsEncoder     = compiler.VarsEncoder
+	CompiledProgram = vm.Program
+	VMStore         = vm.Store
+	Vm              = vm.Vm
+	Vars            = vm.Vars
+)
+
+// Compiler error types, aliased so callers of Compile and VarsEncoder.Encode
+// can classify failures with errors.As without reaching into internal
+// packages. All are returned by value. As with the interpreter's error types,
+// their exported fields, other than the embedded source range, are part of the
+// public contract: only ever added to, never renamed or removed. The Compiler
+// prefix keeps them apart from the interpreter's error types of the same name.
+//
+// CompilerError is implemented by every error Compile reports about the
+// script itself; the others in this block are caused by the script.
+type (
+	CompilerError                          = compiler.CompilerError
+	CompilerTypeError                      = compiler.TypeError
+	CompilerInvalidUncappedSource          = compiler.InvalidUncappedSource
+	CompilerDuplicateRemaining             = compiler.DuplicateRemaining
+	CompilerInvalidMetaPosition            = compiler.InvalidMetaPosition
+	CompilerCannotCastToString             = compiler.CannotCastToString
+	CompilerCannotStoreScopedAccountInMeta = compiler.CannotStoreScopedAccountInMeta
+	CompilerExperimentalFeature            = compiler.ExperimentalFeature
+	CompilerInvalidFeature                 = compiler.InvalidFeature
+)
+
+// CompilerFeatureNotImplemented reports a valid construct the compiler does not
+// support yet; the interpreter may still run the script.
+type CompilerFeatureNotImplemented = compiler.FeatureNotImplemented
+
+// Compiler errors reporting defects in numscript itself, never caused by the
+// script. Their fields are diagnostic only and not part of the contract.
+type (
+	CompilerUnboundVar                   = compiler.UnboundVar
+	CompilerInvalidScopedAccountPosition = compiler.InvalidScopedAccountPosition
+	CompilerUnsupportedNode              = compiler.UnsupportedNode
+)
+
+// Errors returned by VarsEncoder.Encode, caused by the vars. Cause is the
+// parser's error, diagnostic only.
+type (
+	CompilerMissingVariable      = compiler.MissingVariable
+	CompilerInvalidVariableValue = compiler.InvalidVariableValue
+)
+
+// The type checker's findings, carried by CompilerTypeError.Kind. Each kind is
+// a value type whose exported fields follow the same contract as above.
+type (
+	TypecheckErrorKind         = typecheck.ErrorKind
+	TypecheckTypeMismatch      = typecheck.TypeMismatch
+	TypecheckUnboundVariable   = typecheck.UnboundVariable
+	TypecheckInvalidType       = typecheck.InvalidType
+	TypecheckBadArity          = typecheck.BadArity
+	TypecheckUnknownFunction   = typecheck.UnknownFunction
+	TypecheckDuplicateVariable = typecheck.DuplicateVariable
+)
+
+var NewVm = vm.NewVm
+
+var DecodeVars = vm.DecodeVars
+
+func (p ParseResult) Compile() (VarsEncoder, CompiledProgram, error) {
+	return p.CompileWithFeatureFlags(nil)
+}
+
+// CompileWithFeatureFlags compiles the program, rejecting any construct gated
+// behind an experimental feature flag that isn't in featureFlags.
+func (p ParseResult) CompileWithFeatureFlags(featureFlags map[string]struct{}) (VarsEncoder, CompiledProgram, error) {
+	if len(p.parseResult.Errors) != 0 {
+		return VarsEncoder{}, CompiledProgram{}, p.parseResult.Errors[0]
+	}
+
+	if featureFlags == nil {
+		featureFlags = make(map[string]struct{})
+	}
+
+	return compiler.Compile(p.parseResult.Value, featureFlags)
+}
+
+func Compile(source string) (VarsEncoder, CompiledProgram, error) {
+	return Parse(source).Compile()
+}
+
+func CompileWithFeatureFlags(source string, featureFlags map[string]struct{}) (VarsEncoder, CompiledProgram, error) {
+	return Parse(source).CompileWithFeatureFlags(featureFlags)
+}
+
+var DecodeCompiledProgram = vm.DecodeProgram
+
+// BytecodeVersion is the version of the bytecode wire format a compiled
+// program or an encoded Vars was written with — major.minor, versioned
+// independently of the library itself: a new library release does not imply a
+// new bytecode version. A reader accepts a blob of its own major with a minor
+// no newer than its own (BytecodeVersion.CanRead); anything else the decoders
+// reject with UnsupportedBytecodeVersionError. Major 0 is unstable: a 0.x build
+// reads only its exact version, so a host holding a 0.x blob this build
+// rejects should recompile the script from source.
+//
+// CurrentBytecodeVersion is what this build's Compile and Encode write and the
+// newest it can execute. A host that stores bytecode compiled by one build and
+// executes it with another can compare it against the stored blob's version
+// before trusting the bytecode to run; PeekCompiledProgramVersion and
+// PeekVarsVersion read that version from the raw bytes without decoding the
+// rest, and without checking that this build can read it.
+type (
+	BytecodeVersion                 = vm.BytecodeVersion
+	UnsupportedBytecodeVersionError = vm.UnsupportedBytecodeVersionError
+)
+
+var (
+	CurrentBytecodeVersion     = vm.CurrentBytecodeVersion
+	PeekCompiledProgramVersion = vm.PeekProgramVersion
+	PeekVarsVersion            = vm.PeekVarsVersion
+)
+
+// VerifyCompiledProgram statically checks that a program is safe to execute:
+// ExecVm assumes well-formed bytecode and will panic rather than error on a
+// program that is not. Compile's output always is, so this is for programs that
+// came from somewhere else — DecodeCompiledProgram, most obviously.
+//
+// VerifyCompiledProgramWithVars additionally checks the program against the vars
+// it will be given; prefer it whenever vars are in play, since a program that
+// loads a variable is only safe against a pool that actually has it. On
+// success it also returns a VerifiedVarsInfo: a caller that reuses the same
+// compiled Program across many calls (e.g. an LRU cache keyed on the compiled
+// bytes) can keep this and use its CheckVars method to skip re-running
+// verification — a whole-program static pass — when it sees a Vars shape it
+// already knows is compatible.
+type VerifiedVarsInfo = vm.VerifiedVarsInfo
+
+var (
+	VerifyCompiledProgram         = vm.Verify
+	VerifyCompiledProgramWithVars = vm.VerifyWithVars
+)
+
+// VM execution error types, aliased so ExecVm callers can classify failures
+// with errors.As without reaching into internal packages — the same pattern as
+// the interpreter's error types above. The Vm prefix keeps them apart from the
+// interpreter's error types of the same name, which are different types with
+// different fields.
+type (
+	VmMissingFundsError               = vm.MissingFundsError
+	VmNegativeAmountError             = vm.NegativeAmountError
+	VmNegativeBalanceError            = vm.NegativeBalanceError
+	VmAssetMismatchError              = vm.AssetMismatchError
+	VmInvalidAllotmentSum             = vm.InvalidAllotmentSum
+	VmNegativePortionError            = vm.NegativePortionError
+	VmDivideByZeroError               = vm.DivideByZeroError
+	VmInvalidAccountName              = vm.InvalidAccountName
+	VmInvalidColor                    = vm.InvalidColor
+	VmInvalidScope                    = vm.InvalidScope
+	VmCannotCastScopedAccountToString = vm.CannotCastScopedAccountToString
+	VmInvalidUncappedSource           = vm.InvalidUncappedSource
+	VmMetadataNotFoundError           = vm.MetadataNotFoundError
+	VmBadMetaValueError               = vm.BadMetaValueError
+	VmInternalError                   = vm.InternalError
+	VmInvalidPostingError             = vm.InvalidPostingError
+	VmStoreError                      = vm.StoreError
+)
+
+func ExecVm[S VMStore](ctx context.Context, machine *Vm, vars *Vars, store S) (ExecutionResult, error) {
+	res, execErr := vm.Exec(ctx, machine, vars, store)
+	if execErr != nil {
+		return ExecutionResult{}, execErr
+	}
+
+	// Postings share one type (funds.Posting), scope fields included, so they
+	// pass through unchanged. Metadata is normalized to the interpreter's
+	// contract: non-nil maps/slices, account rows in the SetAccountsMetadata
+	// shape.
+	txMeta := res.Metadata
+	if txMeta == nil {
+		txMeta = Metadata{}
+	}
+	accountsMeta := make(SetAccountsMetadata, 0, len(res.AccountsMetadata))
+	for _, e := range res.AccountsMetadata {
+		accountsMeta = append(accountsMeta, SetAccountMetadataRow{
+			Account: e.Account,
+			Key:     e.Key,
+			Value:   e.Value,
+			Scope:   e.Scope,
+		})
+	}
+
+	return ExecutionResult{
+		Postings:         res.Postings,
+		Metadata:         txMeta,
+		AccountsMetadata: accountsMeta,
+	}, nil
+}

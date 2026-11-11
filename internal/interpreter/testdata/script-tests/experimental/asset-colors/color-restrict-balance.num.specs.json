@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "featureFlags": [
+    "experimental-asset-colors"
+  ],
+  "testCases": [
+    {
+      "it": "-",
+      "balances": [
+        {
+          "account": "acc",
+          "asset": "COIN",
+          "amount": 1
+        },
+        {
+          "account": "acc",
+          "asset": "COIN",
+          "amount": 100,
+          "color": "RED"
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "acc",
+          "destination": "dest",
+          "amount": 20,
+          "asset": "COIN",
+          "color": "RED"
+        }
+      ]
+    }
+  ]
+}

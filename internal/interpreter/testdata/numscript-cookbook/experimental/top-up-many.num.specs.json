@@ -1,0 +1,91 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "featureFlags": [
+    "experimental-overdraft-function",
+    "experimental-mid-script-function-call",
+    "experimental-oneof"
+  ],
+  "variables": {
+    "amt": "100"
+  },
+  "testCases": [
+    {
+      "it": "should be a noop when all balances are >= 0",
+      "balances": [
+        {
+          "account": "alice",
+          "asset": "EUR",
+          "amount": 100
+        },
+        {
+          "account": "bob",
+          "asset": "EUR",
+          "amount": 200
+        }
+      ],
+      "expect.postings": []
+    },
+    {
+      "it": "should prioritize alice when both have missing funds",
+      "balances": [
+        {
+          "account": "alice",
+          "asset": "EUR",
+          "amount": -120
+        },
+        {
+          "account": "bob",
+          "asset": "EUR",
+          "amount": -120
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "world",
+          "destination": "alice",
+          "amount": 100,
+          "asset": "EUR"
+        }
+      ]
+    },
+    {
+      "it": "doesn't send funds to alice if there aren't enough funds for the account to be topped-up",
+      "balances": [
+        {
+          "account": "alice",
+          "asset": "EUR",
+          "amount": -80
+        },
+        {
+          "account": "bob",
+          "asset": "EUR",
+          "amount": -120
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "world",
+          "destination": "bob",
+          "amount": 100,
+          "asset": "EUR"
+        }
+      ]
+    },
+    {
+      "it": "funds are kept if there are spare funds",
+      "balances": [
+        {
+          "account": "alice",
+          "asset": "EUR",
+          "amount": -10
+        },
+        {
+          "account": "bob",
+          "asset": "EUR",
+          "amount": -20
+        }
+      ],
+      "expect.postings": []
+    }
+  ]
+}

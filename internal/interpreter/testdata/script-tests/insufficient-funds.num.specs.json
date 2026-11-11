@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "testCases": [
+    {
+      "it": "-",
+      "balances": [
+        {
+          "account": "payments:001",
+          "asset": "GEM",
+          "amount": 12
+        },
+        {
+          "account": "users:001",
+          "asset": "GEM",
+          "amount": 3
+        }
+      ],
+      "variables": {
+        "balance": "users:001",
+        "payment": "payments:001",
+        "seller": "users:002"
+      },
+      "expect.error.missingFunds": true
+    }
+  ]
+}

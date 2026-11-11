@@ -1,0 +1,37 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "testCases": [
+    {
+      "it": "-",
+      "balances": [
+        {
+          "account": "account1",
+          "asset": "A",
+          "amount": 100
+        },
+        {
+          "account": "account2",
+          "asset": "B",
+          "amount": 100
+        }
+      ],
+      "variables": {
+        "a_account": "world"
+      },
+      "expect.postings": [
+        {
+          "source": "world",
+          "destination": "account1",
+          "amount": 100,
+          "asset": "A"
+        },
+        {
+          "source": "world",
+          "destination": "account2",
+          "amount": 100,
+          "asset": "B"
+        }
+      ]
+    }
+  ]
+}

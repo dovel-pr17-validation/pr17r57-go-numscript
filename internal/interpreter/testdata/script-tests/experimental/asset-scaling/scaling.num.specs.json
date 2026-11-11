@@ -1,0 +1,164 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "featureFlags": [
+    "experimental-asset-scaling"
+  ],
+  "testCases": [
+    {
+      "it": "upscales to an higher currency if possible",
+      "balances": [
+        {
+          "account": "src",
+          "asset": "EUR",
+          "amount": 99
+        },
+        {
+          "account": "src",
+          "asset": "EUR/2",
+          "amount": 1
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "src",
+          "destination": "swap",
+          "asset": "EUR",
+          "amount": 4
+        },
+        {
+          "source": "swap",
+          "destination": "src",
+          "asset": "EUR/2",
+          "amount": 400
+        },
+        {
+          "source": "src",
+          "destination": "dest",
+          "asset": "EUR/2",
+          "amount": 400
+        }
+      ]
+    },
+    {
+      "it": "downscales to an smaller currency if possible",
+      "balances": [
+        {
+          "account": "src",
+          "asset": "EUR/3",
+          "amount": 4000
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "src",
+          "destination": "swap",
+          "asset": "EUR/3",
+          "amount": 4000
+        },
+        {
+          "source": "swap",
+          "destination": "src",
+          "asset": "EUR/2",
+          "amount": 400
+        },
+        {
+          "source": "src",
+          "destination": "dest",
+          "asset": "EUR/2",
+          "amount": 400
+        }
+      ]
+    },
+    {
+      "it": "mix",
+      "balances": [
+        {
+          "account": "src",
+          "asset": "EUR",
+          "amount": 2
+        },
+        {
+          "account": "src",
+          "asset": "EUR/2",
+          "amount": 200
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "src",
+          "destination": "swap",
+          "asset": "EUR",
+          "amount": 2
+        },
+        {
+          "source": "swap",
+          "destination": "src",
+          "asset": "EUR/2",
+          "amount": 200
+        },
+        {
+          "source": "src",
+          "destination": "dest",
+          "asset": "EUR/2",
+          "amount": 400
+        }
+      ]
+    },
+    {
+      "it": "a non-canonical asset of the same scale does not mask the canonical one",
+      "balances": [
+        {
+          "account": "src",
+          "asset": "EUR",
+          "amount": 4
+        },
+        {
+          "account": "src",
+          "asset": "EUR/0",
+          "amount": 0
+        }
+      ],
+      "expect.postings": [
+        {
+          "source": "src",
+          "destination": "swap",
+          "asset": "EUR",
+          "amount": 4
+        },
+        {
+          "source": "swap",
+          "destination": "src",
+          "asset": "EUR/2",
+          "amount": 400
+        },
+        {
+          "source": "src",
+          "destination": "dest",
+          "asset": "EUR/2",
+          "amount": 400
+        }
+      ]
+    },
+    {
+      "it": "fails when there aren't enough funds",
+      "balances": [
+        {
+          "account": "src",
+          "asset": "EUR",
+          "amount": 1
+        },
+        {
+          "account": "src",
+          "asset": "EUR/2",
+          "amount": 200
+        },
+        {
+          "account": "src",
+          "asset": "EUR/3",
+          "amount": 10
+        }
+      ],
+      "expect.error.missingFunds": true
+    }
+  ]
+}

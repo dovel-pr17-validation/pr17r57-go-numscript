@@ -1,0 +1,255 @@
+package cmd
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"math/big"
+	"os"
+
+	"github.com/formancehq/numscript/internal/analysis"
+	"github.com/formancehq/numscript/internal/interpreter"
+	"github.com/formancehq/numscript/internal/parser"
+	"github.com/formancehq/numscript/internal/specs_format"
+	"github.com/spf13/cobra"
+)
+
+type testInitArgs struct {
+	path string
+}
+
+func getTestInitCmd() *cobra.Command {
+
+	cmd := &cobra.Command{
+		Use:   "test-init path",
+		Short: "Create a specs file for the given numscript",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			err := runTestInitCmd(testInitArgs{
+				path: args[0],
+			})
+
+			if err != nil {
+				cmd.SilenceErrors = true
+				cmd.SilenceUsage = true
+				return err
+			}
+
+			return nil
+
+		},
+	}
+
+	return cmd
+}
+
+func mkDefaultVar(decl parser.VarDeclaration, checkResult analysis.CheckResult) string {
+	defaultAmt := 100
+	defaultCurr := "USD/2"
+
+	asset := checkResult.GetVarDeclType(decl)
+	switch asset := asset.(type) {
+	case *analysis.TAsset:
+		defaultCurr = string(*asset)
+	}
+
+	switch decl.Type.Name {
+
+	case analysis.TypeMonetary:
+		return fmt.Sprintf("%s %d", defaultCurr, defaultAmt)
+
+	case analysis.TypeNumber:
+		return fmt.Sprintf("%d", defaultAmt)
+
+	case analysis.TypeAccount:
+		return decl.Name.Name
+
+	case analysis.TypeString:
+		return decl.Name.Name
+
+	case analysis.TypePortion:
+		return "1/2"
+
+	case analysis.TypeAsset:
+		return string(defaultCurr)
+	}
+
+	return ""
+}
+
+func MakeSpecsFile(source string) (specs_format.Specs, error) {
+	parseResult := parser.Parse(source)
+	if len(parseResult.Errors) != 0 {
+		fmt.Fprint(os.Stderr, parser.ParseErrorsToString(parseResult.Errors, source))
+		return specs_format.Specs{}, fmt.Errorf("parsing failed")
+	}
+
+	checkResult := analysis.CheckProgram(parseResult.Value)
+
+	vars := map[string]string{}
+	if parseResult.Value.Vars != nil {
+		for _, decl := range parseResult.Value.Vars.Declarations {
+			if decl.Origin != nil {
+				continue
+			}
+
+			value := mkDefaultVar(decl, checkResult)
+			vars[decl.Name.Name] = value
+		}
+	}
+
+	return makeSpecsFile(
+		parseResult.Value,
+		vars,
+		map[string]struct{}{},
+		big.NewInt(100),
+	)
+}
+
+func makeSpecsFile(
+	program parser.Program,
+	vars map[string]string,
+	featureFlags map[string]struct{},
+	defaultBalance *big.Int,
+) (specs_format.Specs, error) {
+
+	store := &TestInitStore{
+		DefaultBalance: defaultBalance,
+		StaticStore: interpreter.StaticStore{
+			Balances: interpreter.Balances{},
+			Meta:     interpreter.AccountsMetadata{},
+		},
+	}
+
+	res, iErr := interpreter.RunProgram(
+		context.Background(),
+		program,
+		vars,
+		store,
+		featureFlags,
+	)
+
+	if iErr != nil {
+		missingFundsErr, missingFunds := iErr.(interpreter.MissingFundsErr)
+		if missingFunds {
+			// TODO we could have better heuristics with a balance for each account/asset pair
+			return makeSpecsFile(
+				program,
+				vars,
+				featureFlags,
+				&missingFundsErr.Needed,
+			)
+		}
+
+		expFeatErr, missingFeatureFlag := iErr.(interpreter.ExperimentalFeature)
+		if missingFeatureFlag {
+			featureFlags[expFeatErr.FlagName] = struct{}{}
+			return makeSpecsFile(
+				program,
+				vars,
+				featureFlags,
+				defaultBalance,
+			)
+		}
+
+		return specs_format.Specs{}, iErr
+	}
+
+	var featureFlags_ []string
+	for k := range featureFlags {
+		featureFlags_ = append(featureFlags_, k)
+	}
+
+	specs := specs_format.Specs{
+		Schema:       specs_format.SchemaURL,
+		Balances:     store.StaticStore.Balances,
+		Vars:         vars,
+		FeatureFlags: featureFlags_,
+		TestCases: []specs_format.TestCase{
+			{
+				It:             "example spec",
+				ExpectPostings: res.Postings,
+			},
+		},
+	}
+
+	return specs, nil
+}
+
+func runTestInitCmd(opts testInitArgs) error {
+	// TODO check there isn't a specsfile already
+
+	numscriptContent, err := os.ReadFile(opts.path)
+	if err != nil {
+		return err
+	}
+
+	specs, err := MakeSpecsFile(string(numscriptContent))
+
+	if err != nil {
+		return err
+	}
+
+	marshaled, _ := json.MarshalIndent(specs, "", "  ")
+
+	if err := os.WriteFile(opts.path+".specs.json", marshaled, 0644); err != nil {
+		return fmt.Errorf("failed to write specs file: %w", err)
+	}
+
+	fmt.Printf("✅ Created specs file: %s.specs.json\n", opts.path)
+
+	return nil
+}
+
+type TestInitStore struct {
+	DefaultBalance *big.Int
+	StaticStore    interpreter.StaticStore
+}
+
+func (s *TestInitStore) GetBalances(ctx context.Context, q interpreter.BalanceQuery) (interpreter.Balances, error) {
+	balances, err := s.StaticStore.GetBalances(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+
+	type key struct{ account, asset, color, scope string }
+
+	// StaticStore.GetBalances materializes a zero-amount row for every queried
+	// (account, asset, color, scope), so its output can't tell a known account from
+	// an unknown one. Track what we've actually funded ourselves instead.
+	stored := make(map[key]struct{}, len(s.StaticStore.Balances))
+	for _, b := range s.StaticStore.Balances {
+		stored[key{b.Account, b.Asset, b.Color, b.Scope}] = struct{}{}
+	}
+
+	for i := range balances {
+		b := &balances[i]
+		k := key{b.Account, b.Asset, b.Color, b.Scope}
+		if _, ok := stored[k]; ok {
+			continue
+		}
+
+		// Unknown (account, asset, color, scope): fund it with the default balance,
+		// and remember it so later queries (and the generated specs file) see it.
+		amount := new(big.Int)
+		if s.DefaultBalance != nil {
+			amount.Set(s.DefaultBalance)
+		}
+		b.Amount = amount
+
+		s.StaticStore.Balances = append(s.StaticStore.Balances, interpreter.BalanceRow{
+			Account: b.Account,
+			Asset:   b.Asset,
+			Color:   b.Color,
+			Scope:   b.Scope,
+			Amount:  new(big.Int).Set(amount),
+		})
+		stored[k] = struct{}{}
+	}
+
+	return balances, nil
+}
+
+func (s *TestInitStore) GetAccountsMetadata(c context.Context, q interpreter.MetadataQuery) (interpreter.AccountsMetadata, error) {
+	return s.StaticStore.GetAccountsMetadata(c, q)
+}

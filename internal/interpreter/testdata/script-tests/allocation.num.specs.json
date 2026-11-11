@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/formancehq/numscript/main/v1.specs.schema.json",
+  "testCases": [
+    {
+      "it": "-",
+      "balances": [
+        {
+          "account": "users:001",
+          "asset": "GEM",
+          "amount": 15
+        }
+      ],
+      "variables": {
+        "driver": "users:002",
+        "rider": "users:001"
+      },
+      "expect.postings": [
+        {
+          "source": "users:001",
+          "destination": "users:002",
+          "amount": 13,
+          "asset": "GEM"
+        },
+        {
+          "source": "users:001",
+          "destination": "a",
+          "amount": 1,
+          "asset": "GEM"
+        },
+        {
+          "source": "users:001",
+          "destination": "b",
+          "amount": 1,
+          "asset": "GEM"
+        }
+      ]
+    }
+  ]
+}

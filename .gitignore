@@ -1,0 +1,11 @@
+.DS_Store
+.antlr
+
+dist/
+
+coverage.*
+
+# compiled test binaries (go test -c)
+*.test
+
+.direnv
