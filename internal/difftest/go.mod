@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.27.3
 
 require (
-	github.com/formancehq/go-libs/v5 v5.6.1
+	github.com/formancehq/go-libs/v5 v5.13.0
 	github.com/formancehq/numscript v0.0.0-00010101000000-000000000000
 	github.com/formancehq/numscript/internal/oracle v0.0.0-00010101000000-000000000000
 )
@@ -19,7 +19,6 @@ require (
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/logrusorgru/aurora v2.0.3+incompatible // indirect
 	github.com/mailru/easyjson v0.9.2 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
